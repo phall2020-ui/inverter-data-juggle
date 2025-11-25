@@ -1,0 +1,30 @@
+Plant,DC Capacity (kW),Month,Total POA (kWh/m²),Avg POA (kWh/m²),Readings
+Blachford UK,333.0,June 2025,169.96,0.118025,1440
+Blachford UK,333.0,July 2025,149.5,0.100472,1488
+Blachford UK,333.0,August 2025,123.48,0.082985,1488
+Blachford UK,333.0,September 2025,90.01,0.062504,1440
+Blachford UK,333.0,October 2025,45.11,0.030316,1488
+Cromwell Tools,999.8,June 2025,170.1,0.118127,1440
+Cromwell Tools,999.8,July 2025,148.14,0.099558,1488
+Cromwell Tools,999.8,August 2025,126.03,0.084699,1488
+Cromwell Tools,999.8,September 2025,89.59,0.062213,1440
+Cromwell Tools,999.8,October 2025,41.53,0.027913,1488
+Finlay Beverages,1837.2,July 2025,79.85,0.053664,1488
+Finlay Beverages,1837.2,August 2025,102.92,0.069164,1488
+Finlay Beverages,1837.2,September 2025,75.43,0.052379,1440
+Finlay Beverages,1837.2,October 2025,38.53,0.025897,1488
+Man City FC Training Ground,2275.1,June 2025,144.38,0.100262,1440
+Man City FC Training Ground,2275.1,July 2025,136.36,0.091638,1488
+Man City FC Training Ground,2275.1,August 2025,116.16,0.078064,1488
+Man City FC Training Ground,2275.1,September 2025,76.66,0.053238,1440
+Man City FC Training Ground,2275.1,October 2025,36.58,0.024585,1488
+Metrocentre,739.53,June 2025,155.2,0.10778,1440
+Metrocentre,739.53,July 2025,134.95,0.090694,1488
+Metrocentre,739.53,August 2025,124.05,0.083369,1488
+Metrocentre,739.53,September 2025,83.56,0.058026,1440
+Metrocentre,739.53,October 2025,47.67,0.032035,1488
+Smithy's Mushrooms PH2,89.91,June 2025,151.39,0.10513,1440
+Smithy's Mushrooms PH2,89.91,July 2025,144.26,0.096947,1488
+Smithy's Mushrooms PH2,89.91,August 2025,139.45,0.093716,1488
+Smithy's Mushrooms PH2,89.91,September 2025,93.62,0.065016,1440
+Smithy's Mushrooms PH2,89.91,October 2025,47.74,0.032084,1488
