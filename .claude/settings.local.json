@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(git reset:*)",
+      "Bash(start \"\" \"c:\\Users\\PeterHall\\OneDrive - AMPYR IDEA UK Ltd\\Python scripts\\O&M Tracker\\O-M-Tracker\\O-M-Tracker\\demo.html\")",
+      "Bash(dir:*)",
+      "Bash(cmd /c start demo.html)",
+      "Bash(test -d:*)",
+      "Bash(npm run setup:*)",
+      "Bash(where npm:*)",
+      "Bash(git pull:*)",
+      "Bash(cmd /c start demo-sharepoint.html)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nFix demo-sharepoint.html by adding complete JavaScript functionality\n\nThe file was incomplete and missing the entire JavaScript section, causing all navigation and visuals to be non-functional. Added comprehensive SharePoint integration code including:\n\n- SharePoint REST API integration for Sites, SPVs, and RateTiers lists\n- All UI functions (showPage, updateDashboard, table rendering)\n- Chart.js visualizations (revenue trend, contract status, CM usage)\n- Fee calculation engine and portfolio summary logic\n- Proper HTML closing tags\n\nThe file is now fully functional with clickable navigation, working charts, and complete data integration with SharePoint lists.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(cmd /c start \"C:\\Users\\PeterHall\\OneDrive - AMPYR IDEA UK Ltd\\Python scripts\\O&M Tracker\\O-M-Tracker\\demo-sharepoint.html\")",
+      "Bash(findstr:*)",
+      "Bash(ls:*)",
+      "Bash(cmd /c start \"\" \"C:\\Users\\PeterHall\\OneDrive - AMPYR IDEA UK Ltd\\Python scripts\\O&M Tracker\\O-M-Tracker\\QUICKSTART.md\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

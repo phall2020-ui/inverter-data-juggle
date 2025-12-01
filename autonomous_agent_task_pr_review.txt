@@ -1,0 +1,148 @@
+Task: PR / DC-capacity reconciliation and inverter inventory check
+
+Purpose
+- Programmatically compare actual inverter devices available in the Juggle site/API with what the database readings show, reconcile DC capacity discrepancies, flag data quality issues, and produce CSV reports and an optional DB update script.
+
+Context (what we've done)
+- We ran PR sense checks and found many sites whose registered DC_kWp >> observed inverter peak output.
+- Created `dc_capacity_update.csv` (you used it to manually update DC values) and `dc_capacity_implied.csv` (implied DC based on peak/0.8 calculation).
+- Observed timestamp misalignment (POA is naive local time; inverter readings are UTC), POA unit label differences (kWh/m stored per half-hour), and some corrupted values (e.g., Newfold Farm).
+
+Primary Goals for Autonomous Agent
+1. For each plant in DB, fetch the list of inverters registered in the Juggle/site API.
+2. Compare API-registered inverter list to distinct inverter emig_id values observed in `readings` table.
+3. Produce a discrepancy report with: missing from API, missing from DB readings, difference in counts, per-inverter peak power, per-inverter last-seen timestamp.
+4. Verify DC capacity: compute sum of observed per-inverter peak powers and compare to `plants.dc_size_kw`. Propose an "implied DC" value (implied_dc = sum_peak / 0.8) and list suggested updates when implied_dc differs > 5%.
+5. Flag data-quality issues: missing POA, duplicate POA timestamps, timezone mismatches, corrupted/implausible power values (>1 MW for small sites), zero-power sites with DC>0.
+6. Produce CSVs: `inverter_inventory_compare.csv`, `dc_capacity_implied.csv` (if new), and `db_update_script.sql` (optional SQL statements to update `plants.dc_size_kw`).
+7. (Optional) If authorized, run updates safely (wrap updates in transactions and create backups / SQL dump) and write changes to DB only after confirmation.
+
+Inputs available in workspace
+- SQLite DB: `plant_registry.sqlite` (tables: `plants`, `readings`, etc.)
+- Previously generated files: `dc_capacity_update.csv`, `dc_capacity_implied.csv`
+- Python scripts used to run analysis (`comprehensive_sense_check.py`, `comprehensive_pr_analysis.py`, `pr_analysis_summary.py`, etc.).
+
+Agent Preconditions & Credentials
+- The agent needs API credentials for the Juggle API (API key, client id, secret, or session cookies). These must be provided securely.
+- If no API credentials, the agent should instead try to use the Juggle web UI (if human-guided) and export the inverter list manually.
+
+Suggested Steps (detailed) the agent should perform
+1. Environment checks
+   - Confirm Python >= 3.10 available with `pandas`, `requests`, `sqlite3`.
+   - Confirm access to `plant_registry.sqlite`.
+
+2. Load plant list from DB
+   - SQL: SELECT alias, plant_uid, dc_size_kw, inverter_ids FROM plants ORDER BY alias;
+   - Save as `plants_list.csv` for reference.
+
+3. For each plant_uid:
+   A. Query Juggle API (example pseudo-endpoints) to get registered inverters
+      - Example (replace with real Juggle endpoints):
+        - GET /api/v1/sites/{plant_uid}/devices
+        - GET /api/v1/inverters?site={plant_uid}
+      - Request headers: Authorization: Bearer {API_KEY}
+      - Expected response: JSON array with `deviceId` or `emigId`, `model`, `rated_power_kW`, `installed_date`, `status`.
+      - Save to `api_inverters/{plant_uid}.json` and append to a CSV.
+
+   B. Query DB to extract distinct inverter emig_id & per-inverter stats
+      - SQL to get per-inverter observed stats:
+        SELECT emig_id,
+               COUNT(*) as readings_count,
+               MAX(ts) as last_seen,
+               MIN(ts) as first_seen,
+               MAX(CAST(json_extract(payload, '$.apparentPower.value') AS REAL)) as peak_w
+        FROM readings
+        WHERE plant_uid = ? AND emig_id LIKE 'INVERT:%'
+        GROUP BY emig_id;
+      - Convert peak_w to kW (peak_kw = peak_w / 1000)
+
+   C. Compare API vs DB
+      - Identify inverters present in API but missing in DB readings (not producing data)
+      - Identify inverters present in DB readings but absent from API (unregistered devices or mismatched IDs)
+
+4. DC capacity reconciliation
+   - For plant, compute sum_inverter_peaks_kw = sum(peak_kw) from step 3B
+   - peak_ratio = sum_inverter_peaks_kw / dc_size_kw
+   - implied_dc_kw = sum_inverter_peaks_kw / 0.8 (80% rule) — add parameterizable factor
+   - Flag if |implied_dc_kw - dc_size_kw| / dc_size_kw > 0.05 (5%)
+   - Add suggested action: "Update DC to implied_dc_kw" or "Investigate missing inverters".
+
+5. Timezones & POA handling
+   - When comparing timestamps, ensure timezone normalization:
+     - POA `ts` values are naive local timestamps in DB (SolarGIS CSV format).
+     - Inverter `ts` strings are UTC with 'Z'. Convert inverter timestamps to naive local time (or convert POA to UTC) consistently before doing joins. Document chosen approach.
+   - POA conversion: stored values are kWh/m² per half-hour. Convert to W/m² as: poa_wm2 = poa_kwhm2 * 2000.
+
+6. Data quality checks
+   - POA duplicates: SELECT plant_uid, ts, COUNT(*) FROM readings WHERE emig_id = 'POA:SOLARGIS:WEIGHTED' GROUP BY plant_uid, ts HAVING COUNT(*) > 1;
+   - Implausible power: SELECT * FROM readings WHERE emig_id LIKE 'INVERT:%' AND CAST(json_extract(payload,'$.apparentPower.value') AS REAL) > 1e7;
+   - Missing POA: plants with zero POA records.
+   - Corruption check: extreme values (e.g. Newfold Farm 1.3M kW) — mark for human review and quarantine.
+
+7. Produce outputs
+   - `inverter_inventory_compare.csv` with columns: plant_uid, alias, api_inverter_count, db_inverter_count, api_only_ids, db_only_ids, sum_peak_kw, dc_kw, peak_ratio, implied_dc_kw, suggested_action
+   - `per_inverter_stats.csv` listing each inverter: plant_uid, emig_id, first_seen, last_seen, readings_count, peak_kw, model(if from API), rated_power(if from API)
+   - `dc_capacity_implied.csv` (same format as created earlier) with suggested_dc_kw
+   - `db_update_script.sql` (optional), containing safe SQL like:
+       BEGIN TRANSACTION;
+       -- backup
+       CREATE TABLE plants_backup AS SELECT * FROM plants;
+       UPDATE plants SET dc_size_kw = {suggested_dc_kw} WHERE plant_uid = '{plant_uid}';
+       COMMIT;
+     - Do NOT run this script without human confirmation.
+
+8. Logging & errors
+   - Log all API calls, responses (redact tokens), SQL statements executed, and summary counts.
+   - If API rate-limited, back off and retry with exponential backoff.
+
+9. Deliverables
+   - The CSVs above and a final `agent_summary.txt` listing actions taken and any recommendations requiring human follow-up (e.g., Newfold Farm, missing inverter feeds).
+   - (Optional) PR update notes to apply in the dashboard or reporting pipeline to use weekly/monthly PR instead of half-hour instantaneous PR.
+
+Implementation Hints (Python snippets)
+- DB per-inverter query (example):
+  cur.execute('''
+    SELECT emig_id, COUNT(*) as readings_count,
+           MAX(ts) as last_seen,
+           MIN(ts) as first_seen,
+           MAX(CAST(json_extract(payload, '$.apparentPower.value') AS REAL)) as peak_w
+    FROM readings
+    WHERE plant_uid = ? AND emig_id LIKE 'INVERT:%'
+    GROUP BY emig_id
+  ''', (plant_uid,))
+
+- Juggle API call (pseudo):
+  import requests
+  headers = {'Authorization': f'Bearer {API_KEY}'}
+  r = requests.get(f'https://juggle.example.com/api/v1/sites/{plant_uid}/inverters', headers=headers, timeout=30)
+  r.raise_for_status()
+  api_inv = r.json()
+
+- Timestamp normalization (pandas):
+  inv_df['ts'] = pd.to_datetime(inv_df['ts']).dt.tz_convert('UTC').dt.tz_localize(None)
+  poa_df['ts'] = pd.to_datetime(poa_df['ts']).dt.tz_localize(None)
+
+- POA conversion:
+  poa_df['poa_wm2'] = poa_df['poa_kwhm2'] * 2000
+
+Safety & Human-in-the-loop
+- Do not modify DB without human confirmation.
+- For any suggested DB updates, generate SQL `db_update_script.sql` and a separate `preview_changes.csv` listing proposed changes.
+- Highlight any extreme or unexpected values and require manual sign-off before updates.
+
+Acceptance Criteria for the Autonomous Task
+- CSVs generated: `inverter_inventory_compare.csv`, `per_inverter_stats.csv`, `dc_capacity_implied.csv`.
+- A short `agent_summary.txt` describing anomalies and recommended updates.
+- `db_update_script.sql` produced but NOT executed automatically.
+
+Contact points / where to find related files
+- Local DB: `plant_registry.sqlite`
+- Existing reports: `dc_capacity_update.csv`, `dc_capacity_implied.csv`
+- Analysis scripts: `comprehensive_pr_analysis.py`, `pr_analysis_summary.py`
+
+Notes to human operator (you)
+- Provide the Juggle API credentials and confirm if agent should execute DB updates or only prepare scripts.
+- Confirm the threshold for implied DC calculation factor (default 0.8) and relative difference trigger (default 5%).
+
+Finish
+- After running, agent should return the CSVs and `agent_summary.txt` and wait for guidance on applying DB updates.

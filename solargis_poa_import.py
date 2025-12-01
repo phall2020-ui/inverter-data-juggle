@@ -792,7 +792,7 @@ def store_poa_in_db(store, plant_uid: str, poa_df: pd.DataFrame) -> None:
             for _, row in group.iterrows():
                 readings.append({
                     'ts': row['timestamp'],
-                    'poaIrradiance': {'value': row['poa'], 'unit': 'kWh/m'}
+                    'poaIrradiance': {'value': row['poa'], 'unit': 'W/m²'}
                 })
             
             # Store with orientation-specific EMIG ID (overwrites existing)
@@ -843,7 +843,7 @@ def store_poa_in_db(store, plant_uid: str, poa_df: pd.DataFrame) -> None:
             weighted_poa_records = [
                 {
                     'ts': row['timestamp'],
-                    'poaIrradiance': {'value': row['poa'], 'unit': 'kWh/m'}
+                    'poaIrradiance': {'value': row['poa'], 'unit': 'W/m²'}
                 }
                 for _, row in weighted_result.iterrows()
             ]
@@ -878,7 +878,7 @@ def store_poa_in_db(store, plant_uid: str, poa_df: pd.DataFrame) -> None:
         for _, row in poa_df.iterrows():
             readings.append({
                 'ts': row['timestamp'],
-                'poaIrradiance': {'value': row['poa'], 'unit': 'kWh/m'}
+                'poaIrradiance': {'value': row['poa'], 'unit': 'W/m²'}
             })
         
         poa_emig_id = "POA:SOLARGIS"
