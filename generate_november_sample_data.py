@@ -102,7 +102,8 @@ def get_solar_factor(hour: int) -> float:
     elif hour < 10 or hour > 14:
         return 0.6
     else:  # 10am-2pm peak
-        return 0.8 + random.uniform(0, 0.2)
+        # Cap at 1.0 to avoid impossible solar generation beyond 100%
+        return min(1.0, 0.8 + random.uniform(0, 0.2))
 
 
 def generate_inverter_reading(timestamp: datetime, emig_id: str, base_power: float = 3000) -> Dict:

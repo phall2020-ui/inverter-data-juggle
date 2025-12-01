@@ -22,6 +22,10 @@ import numpy as np
 from plant_store import PlantStore, DEFAULT_DB
 
 
+# Time interval in hours for half-hourly data (30 minutes = 0.5 hours)
+HALF_HOUR_INTERVAL = 0.5
+
+
 class SitePerformance:
     """Performance metrics for a single site."""
     
@@ -158,8 +162,8 @@ def calculate_site_metrics(store: PlantStore, site_name: str,
         # Convert to numeric
         df[power_col] = pd.to_numeric(df[power_col], errors="coerce")
         
-        # Estimate energy: power (kW) * time interval (0.5 hours for half-hourly data)
-        df["energy_kwh"] = df[power_col].fillna(0) * 0.5 / 1000  # W to kWh
+        # Estimate energy: power (W) * time interval (hours) / 1000 to get kWh
+        df["energy_kwh"] = df[power_col].fillna(0) * HALF_HOUR_INTERVAL / 1000  # W to kWh
         
         # Total energy
         site.total_energy_kwh = df["energy_kwh"].sum()
@@ -172,9 +176,9 @@ def calculate_site_metrics(store: PlantStore, site_name: str,
         for month, energy in monthly.items():
             site.monthly_data[month] = energy
         
-        # Operating hours (non-zero power readings)
+        # Operating hours (non-zero power readings * interval)
         non_zero = df[df[power_col] > 0]
-        site.operating_hours = len(non_zero) * 0.5
+        site.operating_hours = len(non_zero) * HALF_HOUR_INTERVAL
     
     site.record_count = len(df)
     

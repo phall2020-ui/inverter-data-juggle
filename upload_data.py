@@ -85,8 +85,11 @@ def check_existing_records(store: PlantStore, plant_uid: str, emig_id: str,
     start_ts = normalize_timestamp(sorted_ts[0])
     end_ts = normalize_timestamp(sorted_ts[-1])
     
+    # Ensure end_ts doesn't already have a Z suffix before adding one
+    end_ts_query = end_ts if end_ts.endswith("Z") else end_ts + "Z"
+    
     # Load existing readings
-    readings = store.load_readings(plant_uid, emig_id, start_ts, end_ts + "Z")
+    readings = store.load_readings(plant_uid, emig_id, start_ts, end_ts_query)
     
     for reading in readings:
         ts = reading.get("ts", "")
@@ -238,8 +241,11 @@ def upload_all_sites(data_dir: str = None, db_path: str = None,
     print("=" * 60)
     
     # Register plants if not already in registry
+    # Use a deterministic hash (based on site name characters) to ensure consistent UIDs
     for site_name in sorted(sites):
-        plant_uid = f"ERS:{hash(site_name) % 100000:05d}"
+        # Create a deterministic numeric ID from site name
+        site_id = sum(ord(c) * (i + 1) for i, c in enumerate(site_name)) % 100000
+        plant_uid = f"ERS:{site_id:05d}"
         existing = store.load(site_name)
         if not existing:
             store.save(site_name, plant_uid, [], None, None)
