@@ -6,6 +6,7 @@ import logging
 import argparse
 import io
 from datetime import datetime, timedelta
+import altair as alt
 
 # Ensure local modules can be imported
 sys.path.append(os.getcwd())
@@ -88,12 +89,13 @@ plants = store.list_all()
 today = datetime.today()
 
 # Tabs for different workflows
-tab_fetch, tab_fouling, tab_shading, tab_view, tab_registry = st.tabs([
+tab_fetch, tab_fouling, tab_shading, tab_view, tab_completeness, tab_registry = st.tabs([
     "📥 Fetch Data", 
     "🧹 Fouling Analysis", 
     "☀️ Shading Analysis", 
     "📊 View Data",
-    "📋 Plant Registry"
+    "� Data Completeness",
+    "�📋 Plant Registry"
 ])
 
 # --- VIEW DATA TAB ---
@@ -140,6 +142,134 @@ with tab_view:
                         
                 except Exception as e:
                     st.error(f"Error loading data: {e}")
+
+# --- DATA COMPLETENESS TAB ---
+with tab_completeness:
+    st.header("Data Completeness Visualization")
+    st.info("Visualize data availability and identify gaps.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        plant_options = {p['alias']: p for p in plants} if plants else {}
+        comp_plant_alias = st.selectbox("Select Plant", list(plant_options.keys()) if plant_options else [], key="comp_plant")
+        
+    with col2:
+        comp_start = st.date_input("Start Date", today - timedelta(days=30), key="comp_start")
+        comp_end = st.date_input("End Date", today, key="comp_end")
+
+    if st.button("Analyze Completeness", type="primary"):
+        if not comp_plant_alias:
+            st.error("Please select a plant.")
+        else:
+            with st.spinner("Analyzing data gaps..."):
+                try:
+                    # Load data
+                    df_comp = inverter_pipeline.load_db_dataframe(
+                        store, comp_plant_alias,
+                        comp_start.strftime("%Y%m%d"),
+                        comp_end.strftime("%Y%m%d")
+                    )
+                    
+                    if df_comp.empty:
+                        st.warning("No data found for the selected range.")
+                    else:
+                        # Ensure timestamp is datetime
+                        if 'ts' in df_comp.columns:
+                            try:
+                                df_comp['ts'] = pd.to_datetime(df_comp['ts'], format='mixed')
+                            except Exception:
+                                # Fallback if mixed fails (unlikely but safe)
+                                df_comp['ts'] = pd.to_datetime(df_comp['ts'], errors='coerce')
+                                
+                            # Drop duplicates to prevent reindexing errors
+                            df_comp = df_comp.drop_duplicates(subset=['ts'])
+                            df_comp = df_comp.set_index('ts')
+                        
+                        # Create a full index based on the range and expected frequency (e.g., 15 min)
+                        # We'll detect frequency or default to 15T
+                        full_idx = pd.date_range(start=comp_start, end=comp_end + timedelta(days=1), freq='15T', inclusive='left')
+                        
+                        # Reindex to find missing
+                        df_full = df_comp.reindex(full_idx)
+                        
+                        # Determine which column to check for NaNs
+                        check_col = 'ac_power'
+                        if check_col not in df_full.columns:
+                            # Try to find another suitable column
+                            potential_cols = [c for c in df_full.columns if c not in ['ts', 'timestamp', 'date', 'hour', 'status']]
+                            if potential_cols:
+                                check_col = potential_cols[0]
+                                st.info(f"Column 'ac_power' not found. Using '{check_col}' for completeness check.")
+                            else:
+                                st.error("No data columns found to analyze.")
+                                st.stop()
+
+                        # Create a status column
+                        df_full['status'] = df_full[check_col].isna().map({True: 'Missing', False: 'Present'})
+                        df_full['timestamp'] = df_full.index
+                        df_full['date'] = df_full.index.date
+                        df_full['hour'] = df_full.index.hour
+                        
+                        # Calculate stats
+                        total_points = len(df_full)
+                        missing_points = df_full[check_col].isna().sum()
+                        availability = 100 * (1 - missing_points / total_points)
+                        
+                        # Metrics
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Availability", f"{availability:.1f}%")
+                        m2.metric("Total Expected Points", f"{total_points:,}")
+                        m3.metric("Missing Points", f"{missing_points:,}")
+                        
+                        # Heatmap Visualization (Aggregated by Hour for performance)
+                        # We group by Date and Hour and count missing
+                        df_hourly = df_full.groupby([df_full.index.date, df_full.index.hour])[check_col].count().reset_index()
+                        df_hourly.columns = ['date', 'hour', 'count']
+                        # Expected count per hour is 4 (for 15 min intervals)
+                        df_hourly['completeness'] = df_hourly['count'] / 4.0
+                        
+                        # Altair Heatmap
+                        chart = alt.Chart(df_hourly).mark_rect().encode(
+                            x=alt.X('date:O', title='Date'),
+                            y=alt.Y('hour:O', title='Hour of Day'),
+                            color=alt.Color('completeness:Q', scale=alt.Scale(scheme='redyellowgreen'), title='Completeness'),
+                            tooltip=['date', 'hour', alt.Tooltip('completeness', format='.0%')]
+                        ).properties(
+                            title=f"Data Completeness Heatmap ({comp_plant_alias})",
+                            width='container',
+                            height=400
+                        )
+                        
+                        st.altair_chart(chart, use_container_width=True)
+                        
+                        # List major gaps
+                        st.subheader("Major Data Gaps (> 4 hours)")
+                        gaps = df_full[df_full['status'] == 'Missing'].copy()
+                        if not gaps.empty:
+                            # Group consecutive gaps
+                            gaps['group'] = (gaps.index.to_series().diff() > pd.Timedelta('15T')).cumsum()
+                            gap_summary = []
+                            for _, group in gaps.groupby('group'):
+                                start = group.index[0]
+                                end = group.index[-1]
+                                duration = end - start
+                                if duration > timedelta(hours=4):
+                                    gap_summary.append({
+                                        "Start": start,
+                                        "End": end,
+                                        "Duration": str(duration)
+                                    })
+                            
+                            if gap_summary:
+                                st.dataframe(pd.DataFrame(gap_summary), use_container_width=True)
+                            else:
+                                st.info("No major gaps detected.")
+                        else:
+                            st.success("No missing data found!")
+
+                except Exception as e:
+                    st.error(f"Error analyzing completeness: {e}")
+                    logger.exception("Completeness analysis failed")
 
 # --- PLANT REGISTRY TAB ---
 with tab_registry:
@@ -253,6 +383,110 @@ with tab_fetch:
                 st.error(f"SolarGIS data directory not found: {base_dir}")
         else:
             # Manual folder selection
+            manual_folders = st.text_area(
+                "Enter folder paths (one per line)",
+                placeholder="C:\\path\\to\\folder1\nC:\\path\\to\\folder2",
+                key="manual_folders"
+            )
+            
+            if manual_folders:
+                solargis_folders = [
+                    f.strip() for f in manual_folders.split("\n") 
+                    if f.strip() and os.path.isdir(f.strip())
+                ]
+                
+                if solargis_folders:
+                    st.success(f"Valid folders: {len(solargis_folders)}")
+                else:
+                    st.warning("No valid folders found. Please check paths.")
+        
+        poa_import_mode = st.radio(
+            "Plants to Import",
+            ["All Plants in Registry", "Selected Plant Only"],
+            horizontal=True,
+            key="poa_plants"
+        )
+        
+        if st.button("Import POA Data", type="secondary"):
+            if not solargis_folders:
+                st.error("No folders selected or found.")
+            else:
+                # Determine which plants to import based on mode and fuzzy matching
+                plants_to_import = []
+                if poa_import_mode == "All Plants in Registry":
+                    plants_to_import = plants
+                elif selected_alias:
+                    import difflib
+                    all_aliases = [p['alias'] for p in plants]
+                    matches = difflib.get_close_matches(selected_alias, all_aliases, n=5, cutoff=0.5)
+                    if not matches:
+                        st.error(f"No close matches found for '{selected_alias}'. Please check the plant name.")
+                        plants_to_import = []
+                    else:
+                        # If exact match, use it; otherwise let user pick from close matches
+                        if selected_alias in all_aliases:
+                            chosen_alias = selected_alias
+                        else:
+                            chosen_alias = st.selectbox(
+                                f"Select the correct plant for '{selected_alias}'",
+                                matches,
+                                key="fuzzy_plant_select"
+                            )
+                        plants_to_import = [p for p in plants if p['alias'] == chosen_alias]
+                
+                if not plants_to_import:
+                    st.error("No plants selected for import.")
+                else:
+                    imported_count = 0
+                    skipped_count = 0
+                    
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for i, plant_rec in enumerate(plants_to_import):
+                        plant_alias = plant_rec['alias']
+                        plant_uid = plant_rec['plant_uid']
+                        
+                        status_text.text(f"Processing {plant_alias} ({i+1}/{len(plants_to_import)})...")
+                        logger.info(f"--- Checking {plant_alias} ({plant_uid}) ---")
+                        
+                        try:
+                            from solargis_poa_import import import_poa_for_plant_multi_folder, store_poa_in_db
+                            poa_df = import_poa_for_plant_multi_folder(
+                                plant_name=plant_alias,
+                                plant_uid=plant_uid,
+                                solargis_folders=solargis_folders,
+                                start_date=start_date.strftime("%Y%m%d"),
+                                end_date=end_date.strftime("%Y%m%d"),
+                                store=store,
+                                fuzzy_threshold=0.5
+                            )
+                            
+                            if poa_df is not None and not poa_df.empty:
+                                # Delete old POA and weather data
+                                logger.info(f"Removing old POA and weather data for {plant_alias}...")
+                                poa_deleted = store.delete_devices_by_pattern(plant_uid, 'POA:%')
+                                weth_deleted = store.delete_devices_by_pattern(plant_uid, 'WETH:%')
+                                
+                                store_poa_in_db(store, plant_uid, poa_df)
+                                logger.info(f"✅ POA data imported successfully for {plant_alias}")
+                                imported_count += 1
+                            else:
+                                logger.info(f"⏭ No matching POA data found for {plant_alias}")
+                                skipped_count += 1
+                                
+                        except Exception as e:
+                            logger.error(f"❌ Failed to import SolarGIS POA for {plant_alias}: {e}")
+                            skipped_count += 1
+                        
+                        progress_bar.progress((i + 1) / len(plants_to_import))
+                    
+                    status_text.success(f"Import complete! {imported_count} imported, {skipped_count} skipped/failed")
+                    
+                    st.markdown("### Import Logs")
+                    st.code(log_capture_string.getvalue())
+
+    st.markdown("---")
 
     if st.button("Run Fetch", type="primary"):
         plants_to_process = []

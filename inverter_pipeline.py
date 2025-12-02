@@ -239,7 +239,9 @@ def run_fetch(args: argparse.Namespace) -> None:
     api_key = api_key.strip()
 
     plant_uid = (args.plant_uid or (saved["plant_uid"] if saved else None) or os.environ.get("JUGGLE_PLANT_UID", "ERS:00001")).strip()
-    weather_id = (args.weather_id or (saved["weather_id"] if saved else None) or NEWFOLD_WEATHER_ID).strip()
+    weather_id = (args.weather_id or (saved["weather_id"] if saved else None))
+    if weather_id:
+        weather_id = weather_id.strip()
     min_interval_s = args.min_interval_s or int(os.environ.get("JUGGLE_MIN_INTERVAL_S", "1800"))
     args.start_date = _sanitize_date(args.start_date)
     args.end_date = _sanitize_date(args.end_date)
@@ -295,7 +297,7 @@ def run_fetch(args: argparse.Namespace) -> None:
     include_weather = args.include_weather
     all_readings = []
 
-    if include_weather:
+    if include_weather and weather_id:
         if not args.force_download and store.has_fetch(plant_uid, weather_id, cfg.start_date, cfg.end_date):
             logger.info(f"Skipping weather {weather_id}; already cached for {cfg.start_date}-{cfg.end_date}.")
         else:

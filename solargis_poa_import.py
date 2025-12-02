@@ -504,6 +504,10 @@ def calculate_capacity_weighted_poa(
             'slope': slope,
             'capacity': total_capacity
         }).reset_index(drop=True)
+
+        # Convert from kWh/m² per 30-min interval to W/m²
+        # (kWh/m² per 0.5h) * 2000 = W/m²
+        result['poa'] = result['poa'] * 2000.0
         
         # Remove any NaN values
         result = result.dropna()
